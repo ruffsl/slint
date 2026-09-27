@@ -438,7 +438,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             if ident == "drop_in_place" {
                 vtable_ctor.push(quote!(#ident: {
-                    #[allow(unsafe_code)]
                     #sig_extern {
                         #[allow(unused_unsafe)]
                         unsafe { ::core::ptr::drop_in_place((#self_call).0 as *mut T) };
@@ -448,7 +447,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 },));
 
                 drop_impls.push(quote! {
-                    #[allow(unsafe_code)]
                     unsafe impl VTableMetaDropInPlace for #vtable_name {
                         unsafe fn #ident(vtable: &Self::VTable, ptr: *mut u8) -> vtable::Layout {
                             // Safety: The vtable is valid and ptr is a type corresponding to the vtable,
@@ -464,7 +462,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
             if ident == "dealloc" {
                 let abi = &sig_extern.abi;
                 vtable_ctor.push(quote!(#ident: {
-                    #[allow(unsafe_code)]
                     unsafe #abi fn #ident(_: &#vtable_name, ptr: *mut u8, layout: vtable::Layout) {
                         use ::core::convert::TryInto;
                         unsafe { vtable::internal::dealloc(ptr, layout.try_into().unwrap()) }
@@ -490,7 +487,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 block: if has_self {
                     parse_quote!({
                         // Safety: this rely on the vtable being valid, and the ptr being a valid instance for this vtable
-                        #[allow(unsafe_code)]
                         unsafe {
                             let vtable = self.vtable.as_ref();
                             if let #some(func) = vtable.#ident {
@@ -525,7 +521,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     block: parse_quote!({
                         let vtable = self;
                         // Safety: this rely on the vtable being valid, and the ptr being a valid instance for this vtable
-                        #[allow(unsafe_code)]
                         unsafe { (self.#ident)(#call_code) }
                     }),
                 });
@@ -534,7 +529,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     #sig_extern {
                         // This is safe since the self must be a instance of our type
                         #[allow(unused)]
-                        #[allow(unsafe_code)]
                         let vtable = unsafe { ::core::ptr::NonNull::from(&*_0) };
                         #wrap_trait_call(T::#ident(#self_call #forward_code))
                     }
@@ -552,7 +546,6 @@ pub fn vtable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 vtable_ctor.push(quote!(#ident: {
                     #sig_extern {
                         // This is safe since the self must be a instance of our type
-                        #[allow(unsafe_code)]
                         unsafe { #erase_return_type_lifetime(T::#ident(#self_call #forward_code)) }
                     }
                     #ident::<T>
@@ -752,7 +745,6 @@ and implements HasStaticVTable for it.
                             #(#vtable_ctor)*
                         }
                     };
-                    #[allow(unsafe_code)]
                     unsafe impl vtable::HasStaticVTable<#vtable_name> for $ty {
                         const STATIC_VTABLE: &'static #vtable_name = &$ident;
                     }
