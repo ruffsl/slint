@@ -260,6 +260,7 @@ pub fn generate(
         .unwrap_or_else(|| format_ident!("slint_generated"));
 
     let (type_reexports, deprecated_type_exports) = type_exports(&llr, &generated_mod);
+    let strict_lints = strict_lint_allows();
 
     #[cfg(not(feature = "bundle-translations"))]
     let translations = quote!();
@@ -280,20 +281,35 @@ pub fn generate(
             #(#resource_symbols)*
             #translations
         }
-        #[allow(unused_imports)]
+        #[allow(#strict_lints)]
         pub use #generated_mod::{#(#compo_ids,)* #(#type_reexports,)* #(#globals_ids,)* #(#global_exports,)*};
         #(#deprecated_type_exports)*
-        #[allow(unused_imports)]
+        #[allow(#strict_lints)]
         pub use slint::{ComponentHandle as _, Global as _, ModelExt as _};
     })
 }
 
+/// Lints a strict workspace may raise to `deny` that generated code doesn't follow.
+/// The generated file is `include!`d into the user's crate and linted as its own source,
+/// so these are allowed on the generated module and on the re-exports beside it.
+pub(super) fn strict_lint_allows() -> TokenStream {
+    quote! {
+        clippy::restriction,
+        missing_docs, missing_debug_implementations, unnameable_types, unreachable_pub,
+        unused_imports, unused_qualifications, let_underscore_drop, trivial_numeric_casts,
+        unsafe_op_in_unsafe_fn, redundant_lifetimes, unit_bindings, unexpected_cfgs,
+        rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links
+    }
+}
+
 pub(super) fn generate_module_header() -> TokenStream {
+    let strict_lints = strict_lint_allows();
     quote! {
         #![allow(non_snake_case, non_camel_case_types)]
         #![allow(unused_braces, unused_parens, dead_code)]
         #![allow(clippy::all, clippy::pedantic, clippy::nursery)]
         #![allow(unknown_lints, if_let_rescope, tail_expr_drop_order)] // We don't have fancy Drop
+        #![allow(#strict_lints)]
 
         use slint::private_unstable_api::re_exports as sp;
         #[allow(unused_imports)]
@@ -337,6 +353,7 @@ pub(super) fn type_exports(
 ) -> (Vec<TokenStream>, Vec<TokenStream>) {
     let mut reexports = Vec::new();
     let mut deprecated_type_exports = Vec::new();
+    let strict_lints = strict_lint_allows();
     for e in &unit.type_exports {
         let exported = ident(&e.exported_name);
         let internal = ident(&e.internal_name);
@@ -344,7 +361,7 @@ pub(super) fn type_exports(
             // A `#[deprecated] pub use` does not warn on use, but a deprecated type alias does.
             deprecated_type_exports.push(quote! {
                 #[deprecated(note = #note)]
-                #[allow(dead_code)]
+                #[allow(dead_code, #strict_lints)]
                 pub type #exported = #generated_mod::#internal;
             });
         } else if e.is_alias() {
