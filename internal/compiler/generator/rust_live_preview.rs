@@ -16,6 +16,7 @@ pub fn generate(
     compiler_config: &CompilerConfiguration,
 ) -> std::io::Result<TokenStream> {
     let module_header = super::rust::generate_module_header();
+    let strict_lints = super::rust::strict_lint_allows();
 
     let type_value_conversions =
         generate_value_conversions(&doc.used_types.borrow().structs_and_enums);
@@ -71,9 +72,9 @@ pub fn generate(
             #type_value_conversions
         }
         #(#deprecated_type_exports)*
-        #[allow(unused_imports)]
+        #[allow(#strict_lints)]
         pub use #generated_mod::{#(#compo_ids,)* #(#type_reexports,)* #(#globals_ids,)*};
-        #[allow(unused_imports)]
+        #[allow(#strict_lints)]
         pub use slint::{ComponentHandle as _, Global as _, ModelExt as _};
     })
 }
