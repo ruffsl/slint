@@ -366,8 +366,9 @@ mod proc_macro_simulation {
         let (doc, diag, loader) =
             spin_on::spin_on(i_slint_compiler::compile_syntax_node(node, diagnostics, config));
 
-        let rust_code = i_slint_compiler::generator::rust::generate(&doc, &loader.compiler_config)
-            .expect("Rust code generation failed");
+        let rust_code =
+            i_slint_compiler::generator::rust::generate(&doc, &loader.compiler_config, None)
+                .expect("Rust code generation failed");
 
         (rust_code, diag)
     }
@@ -443,7 +444,8 @@ mod phase_breakdown {
 
         // Now benchmark just the code generation
         divan::black_box(
-            i_slint_compiler::generator::rust::generate(&doc, &loader.compiler_config).unwrap(),
+            i_slint_compiler::generator::rust::generate(&doc, &loader.compiler_config, None)
+                .unwrap(),
         );
     }
 
