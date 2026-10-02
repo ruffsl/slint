@@ -564,6 +564,8 @@ pub fn compile_with_config(
 /// Similar to [`compile_with_config`], but meant to be used independently of cargo.
 ///
 /// Will compile the input file and write the result in the given output file.
+/// Include the output file from where it's written:
+/// it refers to the files it embeds by their path relative to it.
 ///
 /// Both input_slint_file_path and output_rust_file_path should be absolute paths.
 ///
@@ -604,8 +606,12 @@ pub fn compile_with_output_path(
     let output_file =
         std::fs::File::create(&output_rust_file_path).map_err(CompileError::SaveError)?;
     let mut code_formatter = CodeFormatter::new(BufWriter::new(output_file));
-    let generated = i_slint_compiler::generator::rust::generate(&doc, &loader.compiler_config)
-        .map_err(|e| CompileError::CompileError(vec![e.to_string()]))?;
+    let generated = i_slint_compiler::generator::rust::generate(
+        &doc,
+        &loader.compiler_config,
+        Some(output_rust_file_path.as_ref()),
+    )
+    .map_err(|e| CompileError::CompileError(vec![e.to_string()]))?;
 
     let mut dependencies: Vec<std::path::PathBuf> = Vec::new();
 

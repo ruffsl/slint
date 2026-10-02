@@ -459,7 +459,7 @@ pub fn slint(stream: TokenStream) -> TokenStream {
         return generated.into();
     }
 
-    let mut result = generator::rust::generate(&root_component, &loader.compiler_config)
+    let mut result = generator::rust::generate(&root_component, &loader.compiler_config, None)
         .unwrap_or_else(|e| {
             let e_str = e.to_string();
             quote!(compile_error!(#e_str))

@@ -103,7 +103,7 @@ pub fn generate(
         }
         #[cfg(feature = "rust")]
         OutputFormat::Rust => {
-            let output = rust::generate(doc, compiler_config)?;
+            let output = rust::generate(doc, compiler_config, destination_path)?;
             write!(destination, "{output}")?;
         }
         #[cfg(feature = "slint-sc")]

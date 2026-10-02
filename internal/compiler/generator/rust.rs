@@ -170,9 +170,13 @@ fn set_primitive_property_value(ty: &Type, value_expression: TokenStream) -> Tok
 }
 
 /// Generate the rust code for the given component.
+///
+/// When `destination_path` names the file the code is written to,
+/// embedded files are referenced relative to it, so the code must be included from there.
 pub fn generate(
     doc: &Document,
     compiler_config: &CompilerConfiguration,
+    destination_path: Option<&std::path::Path>,
 ) -> std::io::Result<TokenStream> {
     if std::env::var("SLINT_LIVE_PREVIEW").is_ok() {
         return super::rust_live_preview::generate(doc, compiler_config);
@@ -251,7 +255,7 @@ pub fn generate(
     });
     let compo_ids = llr.public_components.iter().map(|c| ident(&c.name));
 
-    let resource_symbols = generate_resources(doc);
+    let resource_symbols = generate_resources(doc, destination_path);
     // The inner module was meant to be internal private, but projects have been reaching into it
     // so we can't change the name of this module
     let generated_mod = doc
@@ -6075,22 +6079,54 @@ fn access_component_field_offset(component_id: &Ident, field: &Ident) -> TokenSt
     quote!(#component_id::FIELD_OFFSETS.#field())
 }
 
-fn embedded_file_tokens(path: &str) -> TokenStream {
+fn embedded_file_tokens(path: &str, destination_dir: Option<&std::path::Path>) -> TokenStream {
     let file = crate::fileaccess::load_file(std::path::Path::new(path)).unwrap(); // embedding pass ensured that the file exists
     match file.builtin_contents {
         Some(static_data) => {
             let literal = proc_macro2::Literal::byte_string(static_data);
             quote!(#literal)
         }
-        None => quote!(::core::include_bytes!(#path)),
+        None => {
+            let path = destination_dir
+                .and_then(|dir| relative_path(dir, std::path::Path::new(path)))
+                .unwrap_or_else(|| path.to_string());
+            quote!(::core::include_bytes!(#path))
+        }
     }
 }
 
-fn generate_resources(doc: &Document) -> Vec<TokenStream> {
+/// `target` as a `/`-separated path relative to the directory `base`,
+/// if there is one that the OS resolves to `target` from `base` as spelled.
+/// Unix resolves `..` after following symbolic links and Windows before,
+/// so the path is formed between canonical paths, then checked.
+fn relative_path(base: &std::path::Path, target: &std::path::Path) -> Option<String> {
+    let canonical_base = std::fs::canonicalize(base).ok()?;
+    let canonical_target = std::fs::canonicalize(target).ok()?;
+    let base_components: Vec<_> = canonical_base.components().collect();
+    let target_components: Vec<_> = canonical_target.components().collect();
+    let common = base_components.iter().zip(&target_components).take_while(|(a, b)| a == b).count();
+    let up = base_components[common..].iter().map(|_| Some(".."));
+    let down = target_components[common..].iter().map(|component| match component {
+        std::path::Component::Normal(name) => name.to_str(),
+        _ => None,
+    });
+    let relative = up.chain(down).collect::<Option<Vec<_>>>()?.join("/");
+    (std::fs::canonicalize(base.join(&relative)).ok()? == canonical_target).then_some(relative)
+}
+
+fn generate_resources(
+    doc: &Document,
+    destination_path: Option<&std::path::Path>,
+) -> Vec<TokenStream> {
     #[cfg(feature = "renderer-software")]
     let link_section = std::env::var("SLINT_ASSET_SECTION")
         .ok()
         .map(|section| quote!(#[unsafe(link_section = #section)]));
+
+    // `include_bytes!` resolves a relative path against the directory of the file containing it.
+    let destination_dir = destination_path
+        .and_then(std::path::Path::parent)
+        .map(|dir| if dir.as_os_str().is_empty() { std::path::Path::new(".") } else { dir });
 
     doc.embedded_file_resources
         .borrow()
@@ -6108,7 +6144,7 @@ fn generate_resources(doc: &Document) -> Vec<TokenStream> {
                     unreachable!("slint-sc resources in the Rust generator")
                 },
                 crate::embedded_resources::EmbeddedResourcesKind::FileData => {
-                    let data = embedded_file_tokens(er.path.as_deref().unwrap());
+                    let data = embedded_file_tokens(er.path.as_deref().unwrap(), destination_dir);
                     quote!(static #symbol: &'static [u8] = #data;)
                 }
                 crate::embedded_resources::EmbeddedResourcesKind::DataUriPayload(bytes, _) => {
