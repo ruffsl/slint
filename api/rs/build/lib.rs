@@ -534,14 +534,14 @@ pub fn compile_with_config(
     }
     // Cargo scans a directory dependency recursively, so this also catches an added language.
     if let Some(bundle_path) = &config.config.translation_path_bundle {
-        println!("cargo:rerun-if-changed={}", bundle_path.display());
+        print_rerun_if_changed(bundle_path);
     }
 
     let paths_dependencies =
         compile_with_output_path(path, absolute_rust_output_file_path.clone(), config)?;
 
     for path_dependency in paths_dependencies {
-        println!("cargo:rerun-if-changed={}", path_dependency.display());
+        print_rerun_if_changed(&path_dependency);
     }
 
     println!("cargo:rerun-if-env-changed=SLINT_STYLE");
@@ -666,10 +666,68 @@ pub fn print_rustc_flags() -> std::io::Result<()> {
             }
         }
         println!("cargo:rerun-if-env-changed=DEP_MCU_BOARD_SUPPORT_MCU_BOARD_CONFIG_PATH");
-        println!("cargo:rerun-if-changed={}", board_config_path.display());
+        print_rerun_if_changed(&board_config_path);
     }
 
     Ok(())
+}
+
+/// Cargo stores a `rerun-if-changed` path relative to the package root only when it's under it,
+/// and joins a relative one to the package root.
+/// An absolute path therefore re-runs the build script in every other checkout of the package,
+/// such as a build directory restored from a cache or copied from another checkout.
+fn print_rerun_if_changed(path: &Path) {
+    let manifest_dir = env::var_os("CARGO_MANIFEST_DIR").map(std::path::PathBuf::from);
+    println!(
+        "cargo:rerun-if-changed={}",
+        rerun_if_changed_path(manifest_dir.as_deref(), path).display()
+    );
+}
+
+/// `path` relative to `manifest_dir` when there is a relative path that resolves to it, else `path`.
+fn rerun_if_changed_path(manifest_dir: Option<&Path>, path: &Path) -> std::path::PathBuf {
+    let Some(manifest_dir) = manifest_dir else { return path.to_path_buf() };
+    match path.strip_prefix(manifest_dir) {
+        Ok(relative) if relative.as_os_str().is_empty() => Path::new(".").to_path_buf(),
+        Ok(relative) => relative.to_path_buf(),
+        Err(_) => relative_path(manifest_dir, path).unwrap_or_else(|| path.to_path_buf()),
+    }
+}
+
+/// Unix resolves `..` after following symbolic links and Windows before,
+/// so the path is formed between canonical paths, then checked.
+fn relative_path(base: &Path, target: &Path) -> Option<std::path::PathBuf> {
+    let canonical_base = std::fs::canonicalize(base).ok()?;
+    let canonical_target = std::fs::canonicalize(target).ok()?;
+    let base_components: Vec<_> = canonical_base.components().collect();
+    let target_components: Vec<_> = canonical_target.components().collect();
+    let common = base_components.iter().zip(&target_components).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return None;
+    }
+    let up = base_components[common..].iter().map(|_| std::path::Component::ParentDir);
+    let mut relative: std::path::PathBuf =
+        up.chain(target_components[common..].iter().copied()).collect();
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    (std::fs::canonicalize(base.join(&relative)).ok()? == canonical_target).then_some(relative)
+}
+
+#[test]
+fn rerun_if_changed_path_test() {
+    let manifest_dir = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let path = |p: &Path| rerun_if_changed_path(Some(&manifest_dir), p);
+
+    assert_eq!(path(&manifest_dir.join("lib.rs")), Path::new("lib.rs"));
+    assert_eq!(path(&manifest_dir), Path::new("."));
+
+    let sibling = std::fs::canonicalize(manifest_dir.join("../macros/lib.rs")).unwrap();
+    assert_eq!(path(&sibling), Path::new("../macros/lib.rs"));
+
+    let missing = root_path_prefix().join("no/such/file.slint");
+    assert_eq!(path(&missing), missing);
+    assert_eq!(rerun_if_changed_path(None, &sibling), sibling);
 }
 
 #[cfg(test)]
